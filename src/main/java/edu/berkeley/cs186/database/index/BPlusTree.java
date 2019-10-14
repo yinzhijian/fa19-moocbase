@@ -138,8 +138,8 @@ public class BPlusTree {
         typecheck(key);
         // TODO(hw2): implement
         // TODO(hw4_part2): B+ tree locking
-
-        return Optional.empty();
+        LeafNode node = root.get(key);
+        return node.getKey(key);
     }
 
     /**
@@ -191,8 +191,7 @@ public class BPlusTree {
     public Iterator<RecordId> scanAll() {
         // TODO(hw2): Return a BPlusTreeIterator.
         // TODO(hw4_part2): B+ tree locking
-
-        return Collections.emptyIterator();
+        return new BPlusTreeIterator(root.getLeftmostLeaf());
     }
 
     /**
@@ -222,8 +221,7 @@ public class BPlusTree {
         typecheck(key);
         // TODO(hw2): Return a BPlusTreeIterator.
         // TODO(hw4_part2): B+ tree locking
-
-        return Collections.emptyIterator();
+        return new BPlusTreeIterator(root.get(key), Optional.of(key));
     }
 
     /**
@@ -239,7 +237,17 @@ public class BPlusTree {
         typecheck(key);
         // TODO(hw2): implement
         // TODO(hw4_part2): B+ tree locking
-
+        Optional<Pair<DataBox, Long>> ret = root.put(key, rid);
+        if (ret.isPresent()) {
+            // split root
+            // Construct the root.
+            List<DataBox> keys = new ArrayList<>();
+            keys.add(ret.get().getFirst());
+            List<Long> children = new ArrayList<>();
+            children.add(root.getPage().getPageNum());
+            children.add(ret.get().getSecond());
+            this.updateRoot(new InnerNode(this.metadata, bufferManager, keys, children, lockContext));
+        }
         return;
     }
 
@@ -261,7 +269,19 @@ public class BPlusTree {
     public void bulkLoad(Iterator<Pair<DataBox, RecordId>> data, float fillFactor) {
         // TODO(hw2): implement
         // TODO(hw4_part2): B+ tree locking
-
+        while (data.hasNext()) {
+            Optional<Pair<DataBox, Long>> ret = root.bulkLoad(data, fillFactor);
+            if (ret.isPresent()) {
+                // split root
+                // Construct the root.
+                List<DataBox> keys = new ArrayList<>();
+                keys.add(ret.get().getFirst());
+                List<Long> children = new ArrayList<>();
+                children.add(root.getPage().getPageNum());
+                children.add(ret.get().getSecond());
+                this.updateRoot(new InnerNode(this.metadata, bufferManager, keys, children, lockContext));
+            }
+        }
         return;
     }
 
@@ -280,7 +300,7 @@ public class BPlusTree {
         typecheck(key);
         // TODO(hw2): implement
         // TODO(hw4_part2): B+ tree locking
-
+        root.get(key).remove(key);
         return;
     }
 
@@ -382,20 +402,46 @@ public class BPlusTree {
 
     // Iterator ////////////////////////////////////////////////////////////////
     private class BPlusTreeIterator implements Iterator<RecordId> {
+        private LeafNode current;
+        private int index;
+        private Optional<DataBox> filter;
         // TODO(hw2): Add whatever fields and constructors you want here.
-
+        BPlusTreeIterator(LeafNode leafNode) {
+            current = leafNode;
+            index = 0;
+        }
+        BPlusTreeIterator(LeafNode leafNode, Optional<DataBox> filter) {
+            current = leafNode;
+            index = 0;
+            this.filter = filter;
+            if (!filter.isPresent()) return;
+            while (current.getKeys().size() > index && current.getKeys().get(index).compareTo(filter.get()) < 0) {
+                index++;
+            }
+        }
         @Override
         public boolean hasNext() {
             // TODO(hw2): implement
-
-            return false;
+            if (current.getRids().size() <= index &&
+                   !current.getRightSibling().isPresent()
+            ) {
+                return false;
+            }
+            return true;
         }
 
         @Override
         public RecordId next() {
             // TODO(hw2): implement
-
-            throw new NoSuchElementException();
+            if (current.getRids().size() <= index) {
+                if (current.getRightSibling().isPresent()) {
+                    index = 0;
+                    current = current.getRightSibling().get();
+                } else {
+                    throw new NoSuchElementException();
+                }
+            }
+            return current.getRids().get(index++);
         }
     }
 }

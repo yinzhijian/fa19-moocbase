@@ -79,8 +79,15 @@ class InnerNode extends BPlusNode {
     @Override
     public LeafNode get(DataBox key) {
         // TODO(hw2): implement
-
-        return null;
+        assert(children.size() > 0);
+        int num = numLessThanEqual(key, getKeys());
+        BPlusNode ret;
+        BPlusNode node = getChild(num);
+        do {
+            ret = node;
+            node = node.get(key);
+        } while (node != ret);
+        return (LeafNode)ret;
     }
 
     // See BPlusNode.getLeftmostLeaf.
@@ -88,15 +95,45 @@ class InnerNode extends BPlusNode {
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
         // TODO(hw2): implement
-
-        return null;
+        BPlusNode ret;
+        BPlusNode node = getChild(0);
+        do {
+            ret = node;
+            node = node.getLeftmostLeaf();
+        } while (node != ret);
+        return (LeafNode)ret;
     }
-
+    private Optional<Pair<DataBox, Long>> split() {
+        int order = metadata.getOrder();
+        // need split
+        Page rightPage = bufferManager.fetchNewPage(treeContext,metadata.getPartNum(),false);
+        List<DataBox> keys = this.keys.subList(order+1,this.keys.size());
+        List<Long> children = this.children.subList(order+1,this.children.size());
+        InnerNode node = new InnerNode(metadata, bufferManager, rightPage, keys, children, treeContext);
+        node.sync();
+        Pair<DataBox, Long> pair = new Pair<>(this.keys.get(order), rightPage.getPageNum());
+        this.keys = this.keys.subList(0,order);
+        this.children = this.children.subList(0,order+1);
+        sync();
+        return Optional.of(pair);
+    }
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(hw2): implement
-
+        int num = numLessThanEqual(key, getKeys());
+        BPlusNode child = getChild(num);
+        Optional<Pair<DataBox, Long>> ret = child.put(key,rid);
+        if (ret.isPresent()) {
+            children.add(num+1,ret.get().getSecond());
+            keys.add(num,ret.get().getFirst());
+            int order = metadata.getOrder();
+            if (keys.size() > order*2) {
+                // need split
+                return split();
+            }
+        }
+        sync();
         return Optional.empty();
     }
 
@@ -105,7 +142,19 @@ class InnerNode extends BPlusNode {
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(hw2): implement
-
+        while (data.hasNext()) {
+            BPlusNode node =getChild(children.size()-1);
+            Optional<Pair<DataBox, Long>> pair = node.bulkLoad(data, fillFactor);
+            if (pair.isPresent()) {
+                children.add(pair.get().getSecond());
+                keys.add(pair.get().getFirst());
+                int order = metadata.getOrder();
+                if (keys.size() > order*2) {
+                    return split();
+                }
+            }
+        }
+        sync();
         return Optional.empty();
     }
 
@@ -113,7 +162,8 @@ class InnerNode extends BPlusNode {
     @Override
     public void remove(DataBox key) {
         // TODO(hw2): implement
-
+        BPlusNode node = get(key);
+        node.remove(key);
         return;
     }
 
